@@ -1,0 +1,2 @@
+# Minimal requirements for prototype
+pygame>=2.0.0; python_version >= '3.8'

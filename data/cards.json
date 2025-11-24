@@ -1,0 +1,29 @@
+[
+  {
+    "id": "C001",
+    "name": "Novice Soldier",
+    "cost": 1,
+    "attack": 1,
+    "health": 2,
+    "type": "Minion",
+    "text": "A basic minion for testing."
+  },
+  {
+    "id": "C002",
+    "name": "Arcane Bolt",
+    "cost": 2,
+    "attack": 0,
+    "health": 0,
+    "type": "Spell",
+    "text": "Deal 3 damage to target." 
+  },
+  {
+    "id": "C003",
+    "name": "Mountain Brute",
+    "cost": 3,
+    "attack": 3,
+    "health": 4,
+    "type": "Minion",
+    "text": "A solid midgame minion."
+  }
+]
