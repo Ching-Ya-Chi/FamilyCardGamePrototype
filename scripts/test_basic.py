@@ -1,85 +1,91 @@
-"""Basic smoke tests for the prototype.
-
-Run with:
-  python scripts/test_basic.py
-
-This script performs small checks: load card data, create a Battle instance,
-draw a hand and play a card to verify no immediate exceptions.
-"""
 import sys
+import os
+import time
+import socket
+import subprocess
 from pathlib import Path
 
+# 設定專案根目錄
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+SERVER_SCRIPT = ROOT / "src" / "server" / "server_main.py"
+CLIENT_SCRIPT = ROOT / "client" / "main.py"
+
+SERVER_HOST = "127.0.0.1"
+SERVER_PORT = 5000
+
+def is_port_open(host, port):
+    """檢查指定 Port 是否有服務在運行"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)  # 設定超時，避免卡住
+        result = s.connect_ex((host, port))
+        return result == 0
 
 def run():
-    print('Running basic smoke tests...')
+    print("--- Card Game Prototype Launcher ---")
+    
+    # 設定環境變數，確保子進程能找到專案根目錄的模組
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    
+    server_process = None
+    client_process = None
+
     try:
-        from src.common.models import load_cards_from_file, Card
-        from src.p2p_network.battle import Battle
-
-        cards = load_cards_from_file(str(ROOT / 'data' / 'cards.json'))
-        if not cards:
-            print('FAIL: no cards loaded')
-            return 2
-
-        deck = []
-        # build a tiny deck from the first card
-        for i, c in enumerate(cards.values()):
-            deck.append(Card.from_dict(c.raw))
-            if i >= 3:
-                break
-
-        def on_remote(p):
-            print('remote intent:', p)
-
-        b = Battle(deck, on_remote_intent=on_remote)
-        # For a fast, non-blocking smoke test we avoid network blocking
-        # (Battle.start_as_responder blocks waiting for a socket connection).
-        # Instead, provide a local deterministic RNG and draw opening hand.
-        from src.p2p_network.rng_manager import RNGManager
-        b.rng = RNGManager(0)
-        # shuffle/draw like start_as_responder would
-        b.rng.shuffle(b.local_deck)
-        for _ in range(3):
-            c = b.rng.draw_card(b.local_deck)
-            if c:
-                b.local_hand.append(c)
-        st = b.get_state()
-        print('Initial state:', st)
-
-        if st.get('hand') is None:
-            print('FAIL: no hand key in state')
-            return 3
-
-        # if hand non-empty, play the first card
-        hand = st.get('hand', [])
-        if hand:
-            # play_card will attempt to send a network intent; in this smoke test
-            # there may be no connected peer, which raises RuntimeError from P2PPeer.
-            # That's acceptable here as long as the local effect (enemy_health) was applied.
-            before = b.enemy_health
-            try:
-                ok = b.play_card(0)
-                print('Played card ok?', ok)
-            except RuntimeError as e:
-                print('play_card raised (no peer):', e)
-                ok = False
-
-            after = b.enemy_health
-            if after < before:
-                print('Local effect observed: enemy health reduced', before, '->', after)
-            else:
-                print('No local effect observed')
+        # 1. 檢查 Server 狀態
+        if is_port_open(SERVER_HOST, SERVER_PORT):
+            print(f"✅ 偵測到 Server 已在 {SERVER_HOST}:{SERVER_PORT} 運行中。")
         else:
-            print('No cards to play — ok for small deck')
+            print(f"⚠️  Port {SERVER_PORT} 未被佔用，正在啟動本地 Server...")
+            
+            # 啟動 Server
+            server_process = subprocess.Popen(
+                [sys.executable, str(SERVER_SCRIPT)],
+                env=env,
+                cwd=str(ROOT) # 設定工作目錄為專案根目錄
+            )
+            
+            # 等待幾秒讓 Server 初始化
+            print("   等待 Server 啟動...")
+            time.sleep(2)
+            
+            # 再次檢查確認是否啟動成功
+            if is_port_open(SERVER_HOST, SERVER_PORT):
+                print("✅ Server 啟動成功！")
+            else:
+                print("❌ Server 啟動似乎失敗，請檢查錯誤訊息。")
+                # 雖然失敗但我們繼續嘗試開 Client，或許只是啟動慢
 
-        print('Smoke tests completed (non-blocking mode)')
-        return 0
+        # 2. 啟動 Client
+        print("🚀 正在啟動 Client (main.py)...")
+        client_process = subprocess.Popen(
+            [sys.executable, str(CLIENT_SCRIPT)],
+            env=env,
+            cwd=str(ROOT)
+        )
+
+        print("\n程式運行中... (關閉 Client 視窗以結束此腳本)")
+        
+        # 3. 等待 Client 結束
+        # 我們讓腳本停在這裡，直到 Client 視窗被關閉
+        client_process.wait()
+        print("\nClient 已關閉。")
+
+    except KeyboardInterrupt:
+        print("\n偵測到中斷訊號 (Ctrl+C)。")
     except Exception as e:
-        print('TEST ERROR:', type(e).__name__, e)
-        return 1
-
+        print(f"\n發生未預期的錯誤: {e}")
+    finally:
+        # 4. 清理工作
+        if server_process:
+            print("正在關閉由腳本啟動的本地 Server...")
+            server_process.terminate()
+            try:
+                server_process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                server_process.kill()
+            print("Server 已關閉。")
+        
+        print("Bye!")
 
 if __name__ == '__main__':
-    sys.exit(run())
+    run()

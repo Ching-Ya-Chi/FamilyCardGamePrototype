@@ -193,5 +193,86 @@ class GameDBService:
             JOIN cards c ON m.card_id = c.id
         """
         return self.db.fetchall(sql)
+
+    def get_gacha_box_state(self, user_id):
+        """取得玩家卡盒剩餘狀況"""
+        try:
+            row = self.db.fetchone("SELECT * FROM user_gacha_box WHERE user_id = ?", (user_id,))
+            if not row:
+                # 如果沒有，創建一個新的
+                with self.db.transaction() as conn:
+                    conn.execute("INSERT INTO user_gacha_box (user_id) VALUES (?)", (user_id,))
+                return {'legend_count': 1, 'epic_count': 4, 'rare_count': 20, 'common_count': 75}
+            return dict(row)
+        except Exception as e:
+            print(f"[DB] Get Gacha State Error: {e}")
+            return None
+
+    def execute_gacha_draw(self, user_id, rarity_picked, cost):
+        """
+        執行抽卡交易：
+        1. 扣錢
+        2. 扣除卡盒對應稀有度的數量
+        3. 隨機挑選一張該稀有度的卡片
+        4. 加入玩家庫存
+        """
+        try:
+            with self.db.transaction() as conn:
+                # 1. 檢查金幣
+                user = conn.execute("SELECT gold FROM users WHERE id = ?", (user_id,)).fetchone()
+                if user['gold'] < cost:
+                    return {"success": False, "message": "Not enough gold"}
+
+                # 2. 檢查該稀有度是否還有剩
+                col_name = f"{rarity_picked.lower()}_count" # e.g. legend_count
+                box = conn.execute(f"SELECT {col_name} FROM user_gacha_box WHERE user_id = ?", (user_id,)).fetchone()
+                if box[col_name] <= 0:
+                    return {"success": False, "message": f"No {rarity_picked} cards left in box"}
+
+                # --- 交易執行 ---
+                
+                # A. 扣錢
+                conn.execute("UPDATE users SET gold = gold - ? WHERE id = ?", (cost, user_id))
+                
+                # B. 扣卡盒
+                conn.execute(f"UPDATE user_gacha_box SET {col_name} = {col_name} - 1 WHERE user_id = ?", (user_id,))
+                
+                # C. 隨機選一張該稀有度的卡 (從卡片圖鑑中選)
+                # 注意：這裡簡單用 SQL Random，實際專案可能會有更複雜的權重
+                # 修正: rarity 欄位首字大寫 (Legendary, Epic...)
+                target_rarity_str = rarity_picked.capitalize() 
+                if rarity_picked == "legend": target_rarity_str = "Legendary"
+                
+                card_row = conn.execute(
+                    "SELECT * FROM cards WHERE rarity = ? ORDER BY RANDOM() LIMIT 1", 
+                    (target_rarity_str,)
+                ).fetchone()
+                
+                if not card_row:
+                    # 萬一圖鑑裡沒有這種卡 (防呆)
+                    raise Exception(f"No cards defined for rarity {target_rarity_str}")
+                
+                card_id = card_row['id']
+                
+                # D. 給玩家卡片
+                inventory = conn.execute("SELECT count FROM user_cards WHERE user_id = ? AND card_id = ?", (user_id, card_id)).fetchone()
+                if inventory:
+                    conn.execute("UPDATE user_cards SET count = count + 1 WHERE user_id = ? AND card_id = ?", (user_id, card_id))
+                else:
+                    conn.execute("INSERT INTO user_cards (user_id, card_id, count) VALUES (?, ?, 1)", (user_id, card_id))
+
+                print(f"[DB] Gacha Success: {rarity_picked} -> Card {card_id}")
+                
+                # 回傳卡片資料供前端顯示
+                return {
+                    "success": True, 
+                    "card": dict(card_row),
+                    "remaining": box[col_name] - 1 # 回傳該稀有度剩多少
+                }
+                
+        except Exception as e:
+            print(f"[DB] Gacha Transaction Error: {e}")
+            return {"success": False, "message": str(e)}
+
 # 全域單例
 service = GameDBService()

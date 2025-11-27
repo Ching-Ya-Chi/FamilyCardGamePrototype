@@ -1,9 +1,12 @@
--- 清空舊表 (開發用，正式環境小心)
+-- 清空舊表 (開發用)
+DROP TABLE IF EXISTS user_gacha_box;
+DROP TABLE IF EXISTS transaction_logs;
 DROP TABLE IF EXISTS market_listings;
 DROP TABLE IF EXISTS deck_cards;
 DROP TABLE IF EXISTS user_cards;
 DROP TABLE IF EXISTS cards;
 DROP TABLE IF EXISTS users;
+
 
 -- 1. 使用者表
 CREATE TABLE users (
@@ -67,3 +70,14 @@ CREATE TABLE IF NOT EXISTS transaction_logs (
     FOREIGN KEY(seller_id) REFERENCES users(id),
     FOREIGN KEY(card_id) REFERENCES cards(id)
 );
+
+-- 玩家專屬卡盒狀態 (記錄剩餘數量)
+CREATE TABLE user_gacha_box (
+    user_id INTEGER PRIMARY KEY,
+    legend_count INTEGER DEFAULT 1,
+    epic_count INTEGER DEFAULT 4,
+    rare_count INTEGER DEFAULT 20,
+    common_count INTEGER DEFAULT 75,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+);
+

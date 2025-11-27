@@ -1,10 +1,9 @@
-# client/Lobby_Scene.py
-
 import pygame
+import math
 from pygame import Rect
 from client.utils.resource_manager import ResourceManager
 
-# 定義狀態常數 (供 Scene Manager 和 View 溝通使用)
+# 狀態常數
 START_BATTLE = "START_BATTLE"
 GOTO_GACHA = "GOTO_GACHA"
 GOTO_DECK = "GOTO_DECK"
@@ -13,69 +12,68 @@ GOTO_LOBBY = "GOTO_LOBBY"
 GOTO_SETTINGS = "GOTO_SETTINGS"
 
 class LobbyScene:
-    """
-    負責繪製大廳畫面與處理本地滑鼠事件。
-    """
     def __init__(self, screen, user_data: dict = None):
-        print("[LobbyScene] Initializing...") # Debug
         pygame.font.init()
         self.screen = screen
         self.user = user_data or {"name": "Player", "gold": 0, "gems": 0}
         self.width, self.height = screen.get_size()
         
-        # 字體設定
-        self.font = pygame.font.Font(None, 24)
-        self.title_font = pygame.font.Font(None, 32)
-        self.large_font = pygame.font.Font(None, 48)
+        # 字體優化：稍微大一點，使用粗體
+        self.font = pygame.font.SysFont("Arial", 20, bold=True)
+        self.title_font = pygame.font.SysFont("Arial", 24, bold=True)
+        # 戰鬥按鈕專用字體
+        self.battle_font = pygame.font.SysFont("Arial", 36, bold=True)
 
-        # 介面幾何參數
-        self.status_bar_h = 70
-        self.banner_h = 220
-        self.bottom_bar_h = 80
-
-        # 初始化按鈕區域
         self._init_layout()
 
-        # 顏色定義
+        # 配色優化 (更柔和、更有質感的顏色)
         self.colors = {
             "bg": (18, 18, 30),
-            "status_bg": (28, 28, 46),
-            "panel": (40, 40, 60),
-            "button": (70, 130, 180),
-            "button_hover": (100, 160, 210),
-            "white": (255, 255, 255),
-            "muted": (180, 180, 200),
+            "panel_bg": (0, 0, 0, 180),     # 半透明黑
+            "gold": (255, 215, 0),          # 金色
+            "white": (240, 240, 240),
+            "btn_normal": (60, 60, 80),
+            "btn_hover": (80, 80, 120),
+            "battle_main": (50, 120, 200),  # 戰鬥鈕主色
+            "battle_glow": (100, 180, 255), # 戰鬥鈕光暈
         }
+        
         self._mouse_pos = (0, 0)
+        self.timer = 0.0 # 動畫計時器
 
     def _init_layout(self):
-        # Settings
-        self.settings_rect = Rect(self.width - 50, 15, 36, 36)
+        # Settings (右上角)
+        self.settings_rect = Rect(self.width - 60, 20, 40, 40)
         
-        # Battle button
-        self.battle_rect = Rect(0, 0, int(self.width * 0.7), 64)
-        self.battle_rect.centerx = self.width // 2
-        self.battle_rect.top = self.status_bar_h + self.banner_h + 20
+        # Battle Button (正中央圓形)
+        self.battle_radius = 80  # 稍微加大
+        self.battle_center = (self.width // 2, self.height // 2)
+        
+        # Banner (全螢幕背景)
+        self.banner_rect = Rect(0, 0, self.width, self.height)
+        
+        # Avatar (左上角)
+        self.avatar_rect = Rect(20, 15, 50, 50)
 
-        # Bottom nav
-        nav_y = self.height - self.bottom_bar_h
-        btn_w = self.width // 4
+        # --- 底部按鈕 Layout (改為懸浮圓角) ---
+        btn_w, btn_h = 160, 50
+        gap = 20
+        total_w = (btn_w * 4) + (gap * 3)
+        start_x = (self.width - total_w) // 2
+        y_pos = self.height - 80 # 離底部有一段距離
+        
         self.nav_buttons = []
         labels = [("Draw", GOTO_GACHA), ("Deck", GOTO_DECK), ("Lobby", GOTO_LOBBY), ("Market", GOTO_MARKET)]
+        
         for i, (lbl, state) in enumerate(labels):
-            r = Rect(i * btn_w, nav_y, btn_w, self.bottom_bar_h)
+            r = Rect(start_x + i * (btn_w + gap), y_pos, btn_w, btn_h)
             active = (state == GOTO_LOBBY)
             self.nav_buttons.append((r, lbl, state, active))
-        
-        # Banner & Avatar
-        self.banner_rect = Rect(20, self.status_bar_h + 10, self.width - 40, self.banner_h)
-        self.avatar_rect = Rect(15, 15, 48, 48)
 
     def update(self, events):
-        """
-        Scene Manager 會呼叫此方法。
-        若有按鈕被點擊，回傳狀態字串 (State String)。
-        """
+        # 更新動畫時間
+        self.timer += 0.05
+
         for ev in events:
             if ev.type == pygame.MOUSEMOTION:
                 self._mouse_pos = ev.pos
@@ -83,12 +81,16 @@ class LobbyScene:
             if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                 mx, my = ev.pos
                 
+                # Settings
                 if self.settings_rect.collidepoint((mx, my)):
                     return GOTO_SETTINGS
-
-                if self.battle_rect.collidepoint((mx, my)):
+                
+                # Battle (圓形判定)
+                dist = math.hypot(mx - self.battle_center[0], my - self.battle_center[1])
+                if dist <= self.battle_radius:
                     return START_BATTLE
 
+                # Nav Buttons
                 for rect, label, state, active in self.nav_buttons:
                     if rect.collidepoint((mx, my)):
                         return state
@@ -96,67 +98,132 @@ class LobbyScene:
 
     def draw(self):
         try:
-            self.screen.fill(self.colors["bg"])
+            # 1. 畫背景 (Banner)
+            banner_img = ResourceManager.get_banner_image("banner.png", self.width, self.height)
+            if banner_img:
+                self.screen.blit(banner_img, (0, 0))
+            else:
+                self.screen.fill(self.colors["bg"])
+
+            # 2. 畫頂部資訊欄 (半透明漸層黑底)
+            header_h = 80
+            header_surf = pygame.Surface((self.width, header_h), pygame.SRCALPHA)
+            # 畫一個從上到下的漸層黑色，讓文字清楚但不會擋住背景太多
+            for y in range(header_h):
+                alpha = int(200 * (1 - y/header_h)) # 200 -> 0
+                pygame.draw.line(header_surf, (0, 0, 0, alpha), (0, y), (self.width, y))
             
-            # Status Bar
-            pygame.draw.rect(self.screen, self.colors["status_bg"], (0, 0, self.width, self.status_bar_h))
-            pygame.draw.rect(self.screen, self.colors["panel"], self.avatar_rect, border_radius=6)
-            
-            # Name
+            # 或者簡單一點，直接畫均勻半透明
+            header_surf.fill(self.colors["panel_bg"]) 
+            self.screen.blit(header_surf, (0, 0))
+
+            # Avatar
+            pygame.draw.rect(self.screen, (100, 100, 120), self.avatar_rect, border_radius=10)
+            pygame.draw.rect(self.screen, (200, 200, 200), self.avatar_rect, 2, border_radius=10) # 白邊框
+
+            # User Info
             name_str = str(self.user.get("username", "Player"))
             name_surf = self.title_font.render(name_str, True, self.colors["white"])
-            self.screen.blit(name_surf, (self.avatar_rect.right + 10, 18))
             
-            # Gold
-            gold_val = self.user.get('gold')
-            if gold_val is None: gold_val = 0
-            gold_text = f"Gold: {gold_val}"
-            gold_surf = self.font.render(gold_text, True, self.colors["muted"])
-            self.screen.blit(gold_surf, (self.avatar_rect.right + 10, 50))
+            gold_val = self.user.get('gold', 0)
+            gold_txt = f"Gold: {gold_val}"
+            gold_surf = self.font.render(gold_txt, True, self.colors["gold"])
 
-            # Settings
-            pygame.draw.rect(self.screen, self.colors["panel"], self.settings_rect, border_radius=6)
-            # 畫一個簡單的 'S' 代替齒輪
-            gear = self.font.render("S", True, self.colors["white"])
-            self.screen.blit(gear, (self.settings_rect.x + 10, self.settings_rect.y + 10))
+            self.screen.blit(name_surf, (self.avatar_rect.right + 15, 20))
+            self.screen.blit(gold_surf, (self.avatar_rect.right + 15, 50))
 
-            # Banner
-            banner_img = ResourceManager.get_banner_image(
-                "banner.png", 
-                self.banner_rect.width, 
-                self.banner_rect.height
-            )
+            # Settings Gear
+            # 簡單畫個圓圈代替齒輪
+            pygame.draw.circle(self.screen, (200, 200, 200), self.settings_rect.center, 15, 2)
+            gear_txt = self.font.render("S", True, (200, 200, 200))
+            self.screen.blit(gear_txt, gear_txt.get_rect(center=self.settings_rect.center))
 
-            if banner_img:
-                self.screen.blit(banner_img, self.banner_rect)
-                pygame.draw.rect(self.screen, (100, 100, 120), self.banner_rect, 2, border_radius=8)
-            else:
-                pygame.draw.rect(self.screen, self.colors["panel"], self.banner_rect, border_radius=8)
-                banner_label = self.large_font.render("News / Seasonal Banner", True, self.colors["muted"])
-                lbl_rect = banner_label.get_rect(center=self.banner_rect.center)
-                self.screen.blit(banner_label, lbl_rect)
-            
-            # Battle Button
-            mx, my = self._mouse_pos
-            is_hover = self.battle_rect.collidepoint((mx, my))
-            bcolor = self.colors["button_hover"] if is_hover else self.colors["button"]
-            pygame.draw.rect(self.screen, bcolor, self.battle_rect, border_radius=12)
-            lbl = self.large_font.render("BATTLE", True, self.colors["white"])
-            # 置中
-            lbl_rect = lbl.get_rect(center=self.battle_rect.center)
-            self.screen.blit(lbl, lbl_rect)
+            # 3. 畫中央 Battle 按鈕 (呼吸動畫特效)
+            self.draw_battle_button()
 
-            # Bottom Nav
-            for rect, label, state, active in self.nav_buttons:
-                bg = (60, 60, 80) if active else self.colors["panel"]
-                pygame.draw.rect(self.screen, bg, rect)
-                txt = self.font.render(label, True, self.colors["white"] if active else self.colors["muted"])
-                txt_rect = txt.get_rect(center=rect.center)
-                self.screen.blit(txt, txt_rect)
+            # 4. 畫底部導航列 (懸浮按鈕)
+            self.draw_nav_bar()
 
             pygame.display.flip()
         except Exception as e:
             print(f"[LobbyScene] Draw Error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def draw_battle_button(self):
+        mx, my = self._mouse_pos
+        dist = math.hypot(mx - self.battle_center[0], my - self.battle_center[1])
+        is_hover = dist <= self.battle_radius
+
+        # 呼吸效果 (Scale 縮放)
+        pulse = math.sin(self.timer) * 5 # -5 ~ +5
+        current_radius = self.battle_radius + (pulse if is_hover else 0)
+
+        # 1. 外發光 (Glow) - 畫多層半透明圓
+        glow_surf = pygame.Surface((current_radius*3, current_radius*3), pygame.SRCALPHA)
+        if is_hover:
+            pygame.draw.circle(glow_surf, (*self.colors["battle_glow"], 50), (current_radius*1.5, current_radius*1.5), current_radius + 10)
+            pygame.draw.circle(glow_surf, (*self.colors["battle_glow"], 100), (current_radius*1.5, current_radius*1.5), current_radius + 5)
+        self.screen.blit(glow_surf, (self.battle_center[0] - current_radius*1.5, self.battle_center[1] - current_radius*1.5))
+
+        # 2. 按鈕主體 (漸層感用兩個圓模擬)
+        main_color = self.colors["battle_glow"] if is_hover else self.colors["battle_main"]
+        pygame.draw.circle(self.screen, (30, 30, 50), self.battle_center, current_radius) # 陰影/底
+        pygame.draw.circle(self.screen, main_color, self.battle_center, current_radius - 4) # 主色
+
+        # 3. 內圈裝飾線 (金色)
+        pygame.draw.circle(self.screen, self.colors["gold"], self.battle_center, current_radius - 10, 2)
+
+        # 4. 文字
+        txt = self.battle_font.render("BATTLE", True, self.colors["white"])
+        # 加一點文字陰影
+        shadow = self.battle_font.render("BATTLE", True, (0, 0, 0))
+        self.screen.blit(shadow, (self.battle_center[0] - txt.get_width()//2 + 2, self.battle_center[1] - txt.get_height()//2 + 2))
+        self.screen.blit(txt, (self.battle_center[0] - txt.get_width()//2, self.battle_center[1] - txt.get_height()//2))
+
+    def draw_nav_bar(self):
+        mx, my = self._mouse_pos
+        
+        for rect, label, state, active in self.nav_buttons:
+            is_hover = rect.collidepoint((mx, my))
+            
+            # 決定顏色
+            if active:
+                bg_color = self.colors["battle_main"] # 亮藍色
+                border_color = self.colors["gold"]
+                text_color = self.colors["white"]
+                # 當前頁面按鈕稍微往上浮
+                draw_rect = rect.move(0, -5)
+            elif is_hover:
+                bg_color = self.colors["btn_hover"]
+                border_color = self.colors["white"]
+                text_color = self.colors["white"]
+                draw_rect = rect.move(0, -2)
+            else:
+                bg_color = self.colors["panel_bg"] # 半透明黑
+                border_color = (100, 100, 100)
+                text_color = (200, 200, 200)
+                draw_rect = rect
+
+            # 畫圓角矩形背景
+            # 注意：若要畫半透明圓角矩形，需要先畫在 Surface 上再 blit
+            s = pygame.Surface((draw_rect.width, draw_rect.height), pygame.SRCALPHA)
+            
+            # 根據是否 active 決定透明度 (Active 不透明，其他半透明)
+            color_with_alpha = (*bg_color[:3], 255) if active else (*bg_color[:3], 200)
+            if len(bg_color) == 4: color_with_alpha = bg_color # 如果已經有 alpha
+
+            pygame.draw.rect(s, color_with_alpha, (0, 0, draw_rect.width, draw_rect.height), border_radius=10)
+            
+            # 畫邊框
+            pygame.draw.rect(s, border_color, (0, 0, draw_rect.width, draw_rect.height), 2, border_radius=10)
+            
+            self.screen.blit(s, draw_rect.topleft)
+
+            # 文字
+            txt = self.font.render(label, True, text_color)
+            txt_rect = txt.get_rect(center=draw_rect.center)
+            self.screen.blit(txt, txt_rect)
 
 # Factory function
 def create_lobby_scene(screen, user_data=None):

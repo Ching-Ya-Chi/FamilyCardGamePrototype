@@ -17,7 +17,7 @@ except ModuleNotFoundError:
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
 
-from client.ui import login_view, lobby_view, market_view, deck_builder, battle_view
+from client.ui import login_view, lobby_view, market_view, deck_builder, battle_view, gacha_view 
 
 # Scene manager helpers
 from client.ui.pygame_scene_manager import start_manager, stop_manager, switch_scene, is_running
@@ -36,7 +36,7 @@ class App(tk.Tk):
         self.container.pack(fill="both", expand=True)
 
         self.frames = {}
-        for F in (login_view.LoginView, lobby_view.LobbyView, market_view.MarketView, deck_builder.DeckBuilderView, battle_view.BattleView):
+        for F in (login_view.LoginView, lobby_view.LobbyView, market_view.MarketView, deck_builder.DeckBuilderView, battle_view.BattleView, gacha_view.GachaView):
             frame = F(parent=self.container, controller=self)
             self.frames[F.__name__] = frame
             frame.grid(row=0, column=0, sticky="nsew")

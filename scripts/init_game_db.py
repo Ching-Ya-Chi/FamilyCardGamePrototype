@@ -16,26 +16,39 @@ def init_db():
     db = Database(str(db_path))
     db.connect()
     
+    conn = db.connect() 
+    #在執行 schema 之前，先暫時關閉外鍵檢查，以免 DROP TABLE 失敗
+    conn.execute("PRAGMA foreign_keys = OFF")
     # 1. 建立表格
     db.init_schema(str(schema_path))
-    
-    # 2. 插入卡片資料
+    # 重建後重新開啟檢查，確保後續 INSERT 資料時資料完整性受保護
+    conn.execute("PRAGMA foreign_keys = ON")
+     # 2. 插入卡片資料 (確保稀有度分配正確)
     print("插入卡片資料...")
+    # 格式: (id, name, cost, atk, hp, desc, rarity)
     cards = [
-        (1, "Footman", 1, 1, 2, "A basic soldier.", "Common"),
-        (2, "Wolf", 2, 2, 2, "A wild beast.", "Common"),
-        (3, "Ogre", 5, 6, 7, "Huge and ugly.", "Rare"),
-        (4, "Fire Dragon", 7, 8, 8, "Breaths fire on enemies.", "Legendary"),
-        (5, "Ice Wizard", 3, 3, 4, "Freezes targets.", "Epic"),
-        (6, "Wind Sprite", 1, 2, 1, "Fast and elusive.", "Common"),
+        # 1 Legend
+        (1, "Fire Dragon", 7, 8, 8, "Legendary Dragon.", "Legendary"),
+        # 4 Epic
+        (2, "Ice Wizard", 3, 3, 4, "Freezes targets.", "Epic"),
+        (3, "Thunder Roc", 5, 5, 4, "Strikes with lightning.", "Epic"),
+        (4, "Dark Knight", 4, 4, 5, "Consume life.", "Epic"),
+        (5, "Holy Paladin", 4, 3, 6, "Heals allies.", "Epic"),
+        # Some Rare
+        (6, "Ogre", 5, 6, 7, "Huge and ugly.", "Rare"),
         (7, "Earth Golem", 4, 2, 6, "Solid as a rock.", "Rare"),
-        (8, "Thunder Roc", 5, 5, 4, "Strikes with lightning.", "Epic"),
-        (9, "Squire", 1, 1, 2, "Ready to serve.", "Common"),
-        (10, "Ghoul", 2, 3, 2, "Eats corpses.", "Common")
+        (8, "Wolf", 2, 2, 2, "A wild beast.", "Rare"),
+        # ... 這裡為了簡化，剩下的 ID 9~30 我們隨機分配 Rare/Common
     ]
-    # 補足 20 張
-    for i in range(11, 21):
-        cards.append((i, f"Card {i}", i % 5 + 1, i % 5, i % 5 + 2, f"Random generated card {i}", "Common"))
+    
+    # 補足卡片並隨機分配稀有度 (模擬資料庫)
+    import random
+    for i in range(9, 31):
+        # 簡單機率分配用於測試
+        r_val = random.random()
+        if r_val < 0.2: rarity = "Rare"
+        else: rarity = "Common"
+        cards.append((i, f"Card {i}", random.randint(1,5), random.randint(1,5), random.randint(1,5), "Generated", rarity))
 
     with db.transaction() as conn:
         conn.executemany(
@@ -81,7 +94,22 @@ def init_db():
     with db.transaction() as conn:
         conn.executemany("INSERT INTO market_listings (seller_id, card_id, price, quantity) VALUES (?, ?, ?, ?)", listings)
 
+    # 6. 初始化玩家卡盒 (新增這段)
+    print("初始化玩家卡盒...")
+    user_ids = [1, 2, 3]
+    gacha_boxes = []
+    for uid in user_ids:
+        # 預設 100 張: 1L, 4E, 20R, 75C
+        gacha_boxes.append((uid, 1, 4, 20, 75))
+    
+    with db.transaction() as conn:
+        conn.executemany(
+            "INSERT INTO user_gacha_box (user_id, legend_count, epic_count, rare_count, common_count) VALUES (?, ?, ?, ?, ?)",
+            gacha_boxes
+        )
+
     print("資料庫初始化完成！")
+
 
 if __name__ == "__main__":
     init_db()

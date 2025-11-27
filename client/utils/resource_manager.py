@@ -11,6 +11,8 @@ class ResourceManager:
     ASSETS_DIR = BASE_DIR / "assets" / "cards"
     #field root
     FIELD_DIR = BASE_DIR / "assets" / "Field"
+    #packs root
+    PACKS_DIR = BASE_DIR / "assets" / "packs"
 
     DEFAULT_IMG_NAME = "default.png" 
 
@@ -96,6 +98,39 @@ class ResourceManager:
         if width is not None and height is not None:
             image = pygame.transform.scale(image, (width, height))
 
+        cls._images[key] = image
+        return image
+
+    @classmethod
+    def get_pack_image(cls, filename="pack.png", width=300, height=500):
+        key = f"pack_{filename}_{width}_{height}"
+        if key in cls._images:
+            return cls._images[key]
+            
+        img_path = cls.PACKS_DIR / filename
+        image = None
+        
+        if img_path.exists():
+            try:
+                image = pygame.image.load(str(img_path)).convert_alpha()
+            except Exception:
+                pass
+        
+        # 預設卡包圖 (銀色包裝)
+        if image is None:
+            image = pygame.Surface((300, 500))
+            image.fill((192, 192, 192)) # 銀色
+            # 畫個紋路
+            pygame.draw.line(image, (255, 255, 255), (0, 0), (300, 500), 5)
+            pygame.draw.line(image, (100, 100, 100), (300, 0), (0, 500), 5)
+            # 寫字
+            font = pygame.font.SysFont(None, 60)
+            txt = font.render("CARD PACK", True, (50, 50, 50))
+            image.blit(txt, (150 - txt.get_width()//2, 250 - txt.get_height()//2))
+
+        if width and height:
+            image = pygame.transform.scale(image, (width, height))
+            
         cls._images[key] = image
         return image
 

@@ -55,17 +55,34 @@ class DeckBuilderScene:
         self.deck_slot_rects = []
         self.back_rect = None
 
+        self.error_message = ""
+        self.error_timer = 0.0
+
     def run(self):
         running = True
         while running:
-            self.clock.tick(60)
-            events = pygame.event.get()
-            
-            # 這裡呼叫 update 統一處理
-            res = self.update(events)
-            if res == 'GOTO_LOBBY':
-                running = False
+            dt=self.clock.tick(60)/1000.0
+             # 更新錯誤訊息計時器
+            if self.error_timer > 0:
+                self.error_timer -= dt
 
+            events = pygame.event.get()
+            for event in events:
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    res = self.handle_click(event.pos)
+                    if res == 'GOTO_LOBBY':
+                        running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        # 按 ESC 也要檢查規則，如果不符就不給退 (或退了但不存)
+                        # 這裡簡單做：視同按了 Save 按鈕
+                        res = self.save_and_exit()
+                        if res == 'GOTO_LOBBY':
+                            running = False
+
+            self.update_hover(pygame.mouse.get_pos())
             self.draw()
 
         if getattr(self, '_owned_screen', False):
@@ -91,6 +108,20 @@ class DeckBuilderScene:
 
     def save_and_exit(self):
         """儲存牌組並回傳退出訊號"""
+        # 規則 1: 必須包含至少一張 Cost 1 的卡
+        has_cost_1 = False
+        for card_id in self.deck:
+            card_data = self.card_map.get(card_id)
+            if card_data and card_data['cost'] == 1:
+                has_cost_1 = True
+                break
+        
+        if not has_cost_1:
+            self.error_message = "Deck MUST contain at least one 1-Cost card!"
+            self.error_timer = 3.0 # 顯示 3 秒
+            return None # 不退出
+
+        # 符合規則，儲存並離開
         db_service.save_user_deck(self.user_id, self.deck)
         return 'GOTO_LOBBY'
     
@@ -116,15 +147,25 @@ class DeckBuilderScene:
         back_x = 10
         back_y = 10
         self.back_rect = pygame.Rect(back_x, back_y, back_w, back_h)
-        
-        pygame.draw.rect(self.screen, (50, 150, 50), self.back_rect, border_radius=5)
-        # 加個白框讓按鈕更明顯
-        pygame.draw.rect(self.screen, (255, 255, 255), self.back_rect, 2, border_radius=5)
+
+         # 如果有錯誤，按鈕變紅色
+        btn_color = (200, 50, 50) if self.error_timer > 0 else (50, 150, 50)
+        pygame.draw.rect(self.screen, btn_color, self.back_rect, border_radius=5)
+        back_txt = self.font.render('Save & Back', True, (255, 255, 255))
+        self.screen.blit(back_txt, (back_x + 10, back_y + 8))
         
         back_txt = self.font.render('Save & Back', True, (255, 255, 255))
         # 文字置中
         txt_rect = back_txt.get_rect(center=self.back_rect.center)
         self.screen.blit(back_txt, txt_rect)
+
+        if self.error_timer > 0:
+            err_surf = self.title_font.render(self.error_message, True, (255, 50, 50))
+            # 加個黑底讓字清楚
+            bg_rect = err_surf.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 2))
+            pygame.draw.rect(self.screen, (0, 0, 0), bg_rect.inflate(20, 20))
+            pygame.draw.rect(self.screen, (255, 0, 0), bg_rect.inflate(20, 20), 2)
+            self.screen.blit(err_surf, bg_rect)
 
         pygame.display.flip()
 

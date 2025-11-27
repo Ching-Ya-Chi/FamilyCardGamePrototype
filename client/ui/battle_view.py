@@ -2,12 +2,11 @@ import tkinter as tk
 from tkinter import messagebox
 from src.p2p_network.battle import Battle
 from src.common.models import load_cards_from_file, Card
-from pathlib import Path
 import threading
 import time
 
-CARDS_PATH = str(Path(__file__).resolve().parents[2] / 'data' / 'cards.json')
-
+#引入DB
+from client.services.game_db_service import service as db_service
 
 class BattleView(tk.Frame):
     def __init__(self, parent, controller):
@@ -25,9 +24,16 @@ class BattleView(tk.Frame):
         btn_back.pack(pady=4)
 
         self.battle: Battle = None
-        # load_cards_from_file returns Card instances; accept either dicts or Card objects
-        loaded = load_cards_from_file(CARDS_PATH).values()
-        self.local_deck = [c if isinstance(c, Card) else Card.from_dict(c) for c in loaded]
+        # 嘗試讀取所有卡片作為預設牌組 (或是讀取玩家的牌組)
+        # 這裡我們讀取資料庫的所有卡片，並轉換成 Card 物件
+        raw_cards = db_service.get_card_list()
+        
+        # 將字典列表轉換為 Card 物件列表
+        self.local_deck = [Card.from_dict(c) for c in raw_cards]
+        
+        # 如果牌組太多張，取前 30 張避免過大
+        if len(self.local_deck) > 30:
+            self.local_deck = self.local_deck[:30]
 
     def start_as_initiator(self, peer_ip, peer_port):
         # start battle as initiator (connects to peer and draws hand)
@@ -103,6 +109,13 @@ class BattleView(tk.Frame):
 
                 start_manager(self._scene_stop, size=(800, 600), event_handler=_scene_event_handler)
                 time.sleep(0.1)
-            switch_scene('battle')
+            # 從 controller 取出剛剛建立的 battle 物件
+            battle_instance = getattr(self.controller, 'p2p_battle', None)
+        
+            try:
+            # 切換場景並傳遞物件
+                switch_scene('battle', user_data=self.controller.user, p2p_battle=battle_instance)
+            except Exception as e:
+                print('Failed...', e)
         except Exception as e:
-            print('Failed to switch to battle scene:', e)
+            print('Failed to load BattleView:', e)
