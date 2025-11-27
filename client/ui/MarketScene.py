@@ -20,8 +20,8 @@ class MarketScene:
 
         # Fonts
         pygame.font.init()
-        self.font = pygame.font.SysFont('Arial', 18) # 改用 Arial 避免預設字體問題
-        self.big_font = pygame.font.SysFont('Arial', 24, bold=True)
+        self.font = ResourceManager.get_font(18)
+        self.big_font = ResourceManager.get_font(24)
 
         # 2. 載入卡片定義
         self.cards = db_service.get_card_list()
@@ -74,16 +74,29 @@ class MarketScene:
                     return "GOTO_LOBBY"
 
                 # Left column - clicking card names
-                left_x = 0
-                left_y = 60
+                # 【修正】必須與 draw_left_column 的計算邏輯完全一致
+                top_offset = 50          # 這是 draw 裡面設定的偏移
+                padding = 12
+                search_h = 36
+                gap = 12
+
+                list_y = top_offset + padding + search_h + gap # = 110
                 row_h = 40
-                for idx, c in enumerate(self.cards):
-                    r = pygame.Rect(left_x + 10, left_y + idx * row_h - self.left_scroll, self.left_w - 20, row_h - 6)
-                    if r.collidepoint(mx, my):
+                
+                # 檢查是否點擊在左欄範圍內且在列表區域
+                if 0 < mx < self.left_w and my > list_y:
+                    # 計算點到了第幾個
+                    # 考慮間距 (row_h + 5)
+                    clicked_idx = (my - list_y) // (row_h + 5)
+                    
+                    if 0 <= clicked_idx < len(self.cards):
+                        c = self.cards[int(clicked_idx)]
                         self.selected_card_id = c["id"]
                         self.price_input = ""
                         self.status_message = f"Selected {c['name']}"
-                        break
+                        
+                        # 重新載入該卡片的市場資料
+                        self.refresh_market_data() # 如果需要即時刷新可加這行
 
                 # Input box click
                 if self.input_rect and self.input_rect.collidepoint(mx, my):
@@ -223,11 +236,11 @@ class MarketScene:
         self.screen.blit(search_txt, (search_rect.x + 8, search_rect.y + 8))
 
         list_x = rect.x + padding
-        list_y = search_rect.bottom + 12
+        list_y = search_rect.bottom + 20 
         row_h = 40
 
         for idx, c in enumerate(self.cards):
-            r = pygame.Rect(list_x, list_y + idx * row_h - self.left_scroll, rect.width - 2 * padding, row_h - 6)
+            r = pygame.Rect(search_rect.x, list_y + idx * (row_h + 5), rect.width - 2 * padding, row_h)
             if c["id"] == self.selected_card_id:
                 pygame.draw.rect(self.screen, (80, 120, 160), r, border_radius=4)
             else:
@@ -262,11 +275,22 @@ class MarketScene:
         action_y = rect.y + rect.height - 160
         input_w = rect.width - padding * 2
         self.input_rect = pygame.Rect(rect.x + padding, action_y, input_w, 36)
-        pygame.draw.rect(self.screen, (255, 255, 255) if self.input_active else (100, 100, 100), self.input_rect, border_radius=4)
-        placeholder = self.price_input if self.price_input != "" else "Price"
-        input_color = (0, 0, 0) if self.input_active else (200, 200, 200)
-        input_surf = self.font.render(placeholder, True, input_color)
-        self.screen.blit(input_surf, (self.input_rect.x + 8, self.input_rect.y + 8))
+        
+        # 繪製輸入框背景 (Active時全白，非Active時深灰)
+        bg_color = (255, 255, 255) if self.input_active else (80, 80, 80)
+        pygame.draw.rect(self.screen, bg_color, self.input_rect, border_radius=4)
+        
+        # 決定文字顏色 (Active時黑色，非Active時淺灰)
+        text_color = (0, 0, 0) if self.input_active else (200, 200, 200)
+        
+        # 顯示內容：如果有輸入就顯示輸入，沒有就顯示提示
+        display_text = self.price_input if self.price_input else "Enter Price..."
+        
+        input_surf = self.font.render(display_text, True, text_color)
+        
+        # 垂直置中繪製
+        text_y = self.input_rect.centery - input_surf.get_height() // 2
+        self.screen.blit(input_surf, (self.input_rect.x + 8, text_y))
 
         btn_h = 48
         btn_w = (rect.width - padding * 3) // 2

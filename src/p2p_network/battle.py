@@ -61,20 +61,36 @@ class Battle:
         self.on_remote_intent = on_remote_intent
         self._lock = threading.Lock()
 
-    def start_as_initiator(self, peer_ip: str, peer_port: int, seed: int = None):
+    def start_as_initiator(self, peer_ip: str, peer_port: int, user_id: int, seed: int = None):
         self.is_initiator = True
-        self.peer.connect(peer_ip, peer_port, seed=seed)
-        self.rng = self.peer.rng
-        self._setup_game()
+        success = self.peer.connect(peer_ip, peer_port, user_id, seed=seed)
+        if success:
+            self.rng = self.peer.rng
+            self._setup_game()
+            return True
+        else:
+            return False
 
-    def start_as_responder(self, listen_port: int):
+    def start_as_responder(self, listen_port: int, user_id: int):
         self.is_initiator = False
-        self.peer.accept(listen_port)
-        time.sleep(0.1)
+        self.peer.accept(listen_port, user_id)
+        
+        # 等待 RNG 同步
+        import time
+        wait_start = time.time()
+        while self.peer.rng is None:
+            time.sleep(0.1)
+            # 如果對方是自己並被拒絕，peer.running 會變 False
+            if not self.peer._running:
+                print("[Battle] Peer disconnected during handshake")
+                return False
+            if time.time() - wait_start > 5.0:
+                print("[Battle] Responder handshake timeout")
+                return False
+
         self.rng = self.peer.rng
-        if self.rng is None:
-            self.rng = RNGManager(0)
         self._setup_game()
+        return True
 
     def _setup_game(self):
         """遊戲初始化：洗牌、抽牌、決定先後手、後手補償"""

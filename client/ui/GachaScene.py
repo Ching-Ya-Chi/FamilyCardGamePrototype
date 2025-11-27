@@ -13,9 +13,9 @@ class GachaScene:
         self.engine = GachaEngine(self.user_id)
         
         pygame.font.init()
-        self.font = pygame.font.Font(None, 24)
-        self.title_font = pygame.font.Font(None, 48)
-        self.info_font = pygame.font.Font(None, 32)
+        self.font = ResourceManager.get_font(24)
+        self.title_font = ResourceManager.get_font(48)
+        self.info_font = ResourceManager.get_font(32)
         
         self.bg_color = (30, 30, 45)
         

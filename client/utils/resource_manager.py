@@ -4,6 +4,7 @@ from pathlib import Path
 
 class ResourceManager:
     _images = {}
+    _fonts = {}
     
     # 設定圖片路徑：假設 main.py 在專案根目錄
     # 這裡使用 os.getcwd() 確保從執行目錄開始找
@@ -13,8 +14,66 @@ class ResourceManager:
     FIELD_DIR = BASE_DIR / "assets" / "Field"
     #packs root
     PACKS_DIR = BASE_DIR / "assets" / "packs"
+    #font root
+    FONT_PATH = BASE_DIR / "assets" / "fonts" / "font.ttf"
+    #ui root
+    UI_DIR = BASE_DIR / "assets" / "ui"
 
     DEFAULT_IMG_NAME = "default.png" 
+
+    @classmethod
+    def get_cutin_image(cls, filename="legendary_cutin.png", width=None, height=None):
+        key = f"cutin_{filename}_{width}_{height}"
+        if key in cls._images:
+            return cls._images[key]
+            
+        img_path = cls.PACKS_DIR / filename
+        image = None
+        
+        if img_path.exists():
+            try:
+                image = pygame.image.load(str(img_path)).convert_alpha()
+            except Exception as e:
+                print(f"[ResourceManager] Error loading cutin {img_path}: {e}")
+        
+        # 預設圖 (如果沒檔案，畫個金色圓圈代替)
+        if image is None:
+            image = pygame.Surface((600, 600), pygame.SRCALPHA)
+            pygame.draw.circle(image, (255, 215, 0), (300, 300), 250)
+            font = pygame.font.SysFont(None, 100, bold=True)
+            txt = font.render("LEGENDARY!", True, (255, 255, 255))
+            image.blit(txt, (300 - txt.get_width()//2, 300 - txt.get_height()//2))
+
+        if width and height:
+            image = pygame.transform.scale(image, (width, height))
+            
+        cls._images[key] = image
+        return image
+
+    @classmethod
+    def get_font(cls, size: int):
+        """
+        載入支援中文的字體。
+        如果找不到檔案，則回退到系統預設字體 (但可能不支援中文)。
+        """
+        key = f"font_{size}"
+        if key in cls._fonts:
+            return cls._fonts[key]
+        
+        try:
+            # 嘗試載入自定義字體
+            if cls.FONT_PATH.exists():
+                font = pygame.font.Font(str(cls.FONT_PATH), size)
+            else:
+                # 找不到檔案，嘗試用系統字體 'microsoftjhenghei' (微軟正黑體) 作為備案
+                print(f"[Warning] Font file not found at {cls.FONT_PATH}, using system font.")
+                font = pygame.font.SysFont("microsoftjhenghei", size, bold=True)
+        except Exception as e:
+            print(f"[Error] Font loading failed: {e}")
+            font = pygame.font.Font(None, size) # 最後手段：Pygame 預設字體 (不支援中文)
+
+        cls._fonts[key] = font
+        return font
 
     @classmethod
     def get_card_image(cls, card_id: int, width: int = None, height: int = None):
@@ -127,6 +186,33 @@ class ResourceManager:
             font = pygame.font.SysFont(None, 60)
             txt = font.render("CARD PACK", True, (50, 50, 50))
             image.blit(txt, (150 - txt.get_width()//2, 250 - txt.get_height()//2))
+
+        if width and height:
+            image = pygame.transform.scale(image, (width, height))
+            
+        cls._images[key] = image
+        return image
+
+    @classmethod
+    def get_ui_image(cls, filename, width=None, height=None):
+        key = f"ui_{filename}_{width}_{height}"
+        if key in cls._images:
+            return cls._images[key]
+            
+        img_path = cls.UI_DIR / filename
+        image = None
+        
+        if img_path.exists():
+            try:
+                image = pygame.image.load(str(img_path)).convert_alpha()
+                image.set_colorkey((255, 255, 255)) 
+            except Exception as e:
+                print(f"Error loading UI {img_path}: {e}")
+        
+        # 預設圖 (畫一個空心圓框)
+        if image is None:
+            image = pygame.Surface((100, 100), pygame.SRCALPHA)
+            pygame.draw.circle(image, (150, 150, 150), (50, 50), 50, 5) # 灰色圓框
 
         if width and height:
             image = pygame.transform.scale(image, (width, height))

@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple
 from client.services.game_db_service import service as db_service
 from client.utils.resource_manager import ResourceManager
 from src.p2p_network.battle import Battle
-from client.ui.animations import AttackAnimation, CardPopupAnimation, GameStartAnimation, GameEndAnimation, CoinTossAnimation
+from client.ui.animations import AttackAnimation, CardPopupAnimation, GameStartAnimation, GameEndAnimation, CoinTossAnimation, LegendaryCutinAnimation
 
 # Constants
 IDLE = "IDLE"
@@ -21,6 +21,11 @@ class BattleScene:
     def __init__(self, screen, action_callback=None, user_data=None, p2p_battle=None):
         self.screen = screen
         self.action_callback = action_callback
+        self.bg_image = ResourceManager.get_banner_image("Field.png", self.SCREEN_W, self.SCREEN_H)
+        if self.bg_image is None:
+            # Fallback: 使用純色背景
+            self.bg_image = pygame.Surface((self.SCREEN_W, self.SCREEN_H))
+            self.bg_image.fill((40, 40, 40))
         
         # 1. 初始化引擎
         my_id = user_data.get('user_id', 1) if user_data else 1
@@ -52,11 +57,16 @@ class BattleScene:
             self.engine.rng = RNGManager(0)
             self.engine._setup_game()
             self.is_p2p = False
-        
+
+            #攔截引擎的 Remote Intent 回呼 ---
+        # 我們要把原本的回呼存起來，換成自己的 wrapper
+        # 這樣當對手做動作時，我們先檢查是不是傳說卡，再執行原本邏輯
+        if self.engine:
+            self.original_on_remote = self.engine.on_remote_intent
+            self.engine.on_remote_intent = self._handle_remote_intent_hook
+
         self.clock = pygame.time.Clock()
         
-        self.bg_image = pygame.Surface((self.SCREEN_W, self.SCREEN_H))
-        self.bg_image.fill((40, 40, 40))
 
         pygame.font.init()
         self.font = pygame.font.SysFont("arial", 20)
@@ -198,10 +208,15 @@ class BattleScene:
                         # 取得 ID 供動畫使用
                         p0 = self.engine.players[0]
                         if self.dragging_card_index < len(p0.hand):
-                            card_id = p0.hand[self.dragging_card_index]['id']
+                            card_to_play = p0.hand[self.dragging_card_index]
+                            card_id = card_to_play['id']
                             
                             success = self.engine.play_card(self.dragging_card_index)
                             if success:
+                                if card_to_play.get('rarity') == 'Legendary':
+                                    # 播放傳說切入動畫 (全螢幕)
+                                    cutin = LegendaryCutinAnimation((self.SCREEN_W, self.SCREEN_H))
+                                    self.animations.append(cutin)
                                 center = (self.SCREEN_W // 2, self.SCREEN_H // 2)
                                 self.animations.append(CardPopupAnimation(card_id, center))
                             
@@ -238,6 +253,28 @@ class BattleScene:
                     self.attacker_idx = None
 
         return None
+
+    def _handle_remote_intent_hook(self, payload):
+        """攔截對手動作，檢查是否需要播放特效"""
+        act = payload.get('action')
+        args = payload.get('args', {})
+        
+        if act == 'PLAY_CARD':
+            card_id = args.get('card_id')
+            
+            # 查詢卡片資料以確認稀有度
+            # 這裡簡單快速查表，或者呼叫 db_service
+            all_cards = db_service.get_all_cards_dict()
+            card_data = all_cards.get(card_id)
+            
+            if card_data and card_data.get('rarity') == 'Legendary':
+                # 對手打出了傳說卡！播放切入動畫
+                cutin = LegendaryCutinAnimation((self.SCREEN_W, self.SCREEN_H))
+                self.animations.append(cutin)
+        
+        # 執行原本的回呼 (如果有的話)
+        if self.original_on_remote:
+            self.original_on_remote(payload)
 
     def draw(self):
         self.screen.blit(self.bg_image, (0, 0))
@@ -326,25 +363,84 @@ class BattleScene:
         minions = self.engine.players[p_idx].board
         rects = self._get_minion_rects(p_idx)
         
+        m_size = 100 
+        
         for i, m in enumerate(minions):
             if i >= len(rects): break
             rect = rects[i]
+            center = rect.center
             
-            # 狀態顏色
-            color = (100, 255, 100) if m.can_attack and not m.has_attacked else (200, 200, 200)
-            # 對手的怪是紅的
-            if p_idx != 0: color = (200, 100, 100)
+            # 1. 決定狀態顏色 (發光)
+            glow_color = None
+            if p_idx == self.engine.current_player_idx:
+                if m.can_attack and not m.has_attacked:
+                    glow_color = (0, 255, 0)
+            elif p_idx != 0:
+                 glow_color = (255, 50, 50)
+
+            # 2. 繪製發光背景
+            if glow_color:
+                glow_surf = pygame.Surface((m_size+10, m_size+10), pygame.SRCALPHA)
+                pygame.draw.circle(glow_surf, (*glow_color, 150), ((m_size+10)//2, (m_size+10)//2), (m_size+10)//2)
+                self.screen.blit(glow_surf, (center[0] - (m_size+10)//2, center[1] - (m_size+10)//2))
+
+            # --- 修改開始：遮罩裁切技術 ---
             
-            img = ResourceManager.get_card_image(m.card_id, 80, 80)
+            # 取得原始卡圖與邊框
+            card_img_raw = ResourceManager.get_card_image(m.card_id, m_size, m_size)
+            frame_img = ResourceManager.get_ui_image("minion_frame.png", m_size, m_size)
             
-            pygame.draw.circle(self.screen, color, rect.center, 45)
-            thumb = pygame.transform.scale(img, (60, 60))
-            self.screen.blit(thumb, (rect.centerx - 30, rect.centery - 30))
+            # 建立一個臨時畫布 (支援透明)
+            final_surf = pygame.Surface((m_size, m_size), pygame.SRCALPHA)
             
-            atk_txt = self.font.render(str(m.attack_val), True, (255, 255, 0))
-            hp_txt = self.font.render(str(m.current_hp), True, (255, 0, 0))
-            self.screen.blit(atk_txt, (rect.left, rect.bottom - 20))
-            self.screen.blit(hp_txt, (rect.right - 20, rect.bottom - 20))
+            # A. 製作遮罩 (Mask)
+            # 在畫布上畫一個白色的橢圓 (因為你的框是橢圓的)
+            # 這裡縮小一點點 (m_size-10)，確保圖片不會超出邊框內緣
+            mask_rect = pygame.Rect(5, 5, m_size-10, m_size-10) 
+            pygame.draw.ellipse(final_surf, (255, 255, 255), mask_rect)
+            
+            # B. 將卡圖畫上去，使用 BLEND_RGBA_MIN 模式
+            # 這會保留「卡圖」與「白色橢圓」重疊的部分，達成裁切效果
+            # 注意：這需要卡圖本身沒有透明度，或者背景是黑的
+            card_img_resized = pygame.transform.scale(card_img_raw, (m_size, m_size))
+            
+            # 更穩定的裁切法：
+            # 1. 建立 mask (橢圓)
+            mask = pygame.Surface((m_size, m_size), pygame.SRCALPHA)
+            pygame.draw.ellipse(mask, (255, 255, 255), mask_rect)
+            
+            # 2. 建立卡圖層
+            img_layer = pygame.Surface((m_size, m_size), pygame.SRCALPHA)
+            img_layer.blit(card_img_resized, (0, 0))
+            
+            # 3. 混合：只保留 mask 有像素的地方
+            img_layer.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            
+            # C. 將裁切好的圖貼到螢幕
+            self.screen.blit(img_layer, (center[0] - m_size//2, center[1] - m_size//2))
+            
+            # D. 蓋上邊框
+            #self.screen.blit(frame_img, (center[0] - m_size//2, center[1] - m_size//2))
+            
+            # --- 修改結束 ---
+            
+            # 5. 攻/血 數值 (維持不變)
+            atk_bg = pygame.Surface((24, 24), pygame.SRCALPHA)
+            pygame.draw.circle(atk_bg, (240, 200, 50), (12, 12), 12)
+            hp_bg = pygame.Surface((24, 24), pygame.SRCALPHA)
+            pygame.draw.circle(hp_bg, (200, 50, 50), (12, 12), 12)
+            
+            atk_pos = (rect.left - 5, rect.bottom - 25)
+            hp_pos = (rect.right - 20, rect.bottom - 25)
+            
+            self.screen.blit(atk_bg, atk_pos)
+            self.screen.blit(hp_bg, hp_pos)
+            
+            atk_txt = self.font.render(str(m.attack_val), True, (0, 0, 0))
+            hp_txt = self.font.render(str(m.current_hp), True, (255, 255, 255))
+            
+            self.screen.blit(atk_txt, (atk_pos[0] + 12 - atk_txt.get_width()//2, atk_pos[1] + 12 - atk_txt.get_height()//2))
+            self.screen.blit(hp_txt, (hp_pos[0] + 12 - hp_txt.get_width()//2, hp_pos[1] + 12 - hp_txt.get_height()//2))
 
     def _draw_hand(self, p_idx):
         if self.state == DRAGGING_CARD:

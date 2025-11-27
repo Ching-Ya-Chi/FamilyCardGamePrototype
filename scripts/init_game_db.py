@@ -28,16 +28,16 @@ def init_db():
     # 格式: (id, name, cost, atk, hp, desc, rarity)
     cards = [
         # 1 Legend
-        (1, "Fire Dragon", 7, 8, 8, "Legendary Dragon.", "Legendary"),
+        (1, "便當龍", 7, 8, 8, "Legendary Dragon.", "Legendary"),
         # 4 Epic
-        (2, "Ice Wizard", 3, 3, 4, "Freezes targets.", "Epic"),
-        (3, "Thunder Roc", 5, 5, 4, "Strikes with lightning.", "Epic"),
-        (4, "Dark Knight", 4, 4, 5, "Consume life.", "Epic"),
-        (5, "Holy Paladin", 4, 3, 6, "Heals allies.", "Epic"),
+        (2, "霜淇淋法師", 3, 3, 4, "Freezes targets.", "Epic"),
+        (3, "優格超人", 5, 5, 4, "Strikes with lightning.", "Epic"),
+        (4, "御夫-飯糰", 4, 4, 5, "Consume life.", "Epic"),
+        (5, "屠夫", 4, 3, 6, "Heals allies.", "Epic"),
         # Some Rare
-        (6, "Ogre", 5, 6, 7, "Huge and ugly.", "Rare"),
-        (7, "Earth Golem", 4, 2, 6, "Solid as a rock.", "Rare"),
-        (8, "Wolf", 2, 2, 2, "A wild beast.", "Rare"),
+        (6, "三明治守衛", 5, 6, 7, "Huge and ugly.", "Rare"),
+        (7, "來杯咖啡嗎", 4, 2, 6, "Solid as a rock.", "Rare"),
+        (8, "茶葉蛋大師", 2, 2, 2, "A wild beast.", "Rare"),
         # ... 這裡為了簡化，剩下的 ID 9~30 我們隨機分配 Rare/Common
     ]
     

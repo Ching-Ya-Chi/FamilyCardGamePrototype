@@ -3,8 +3,7 @@
 import tkinter as tk
 from tkinter import messagebox
 import threading
-from client.ui.connection_dialog import ConnectionDialog # 新增
-from src.p2p_network.battle import Battle # 引入 P2P Battle
+from src.p2p_network.battle import Battle,P2PPeer # 引入 P2P Battle
 from client.services.game_db_service import service as db_service # 讀牌組用
 from src.common.models import Card # 用來轉換牌組格式
 
@@ -93,67 +92,96 @@ class LobbyView(tk.Frame):
             print(f"Failed to switch scene: {e}")
 
     def start_p2p_battle(self):
-        """處理 P2P 連線並啟動 BattleScene"""
-        # 1. 彈出對話框選擇 Host/Join
-        dialog = ConnectionDialog(self)
-        if not dialog.result:
-            return # 取消
+        """自動處理 P2P 連線：先嘗試 Join，失敗則 Host"""
+        
+        # 1. 取得使用者資料
+        user = self.controller.user
+        uid = user.get('user_id')
+        if not uid:
+            messagebox.showerror("Error", "User ID not found!")
+            return
 
-        mode = dialog.result[0]
-        
-        # 2. 準備牌組 (從 DB 讀取並轉換成 Battle 需要的 Card 物件)
-        uid = self.controller.user.get('user_id', 1)
+        # 2. 準備牌組 (與之前相同)
         deck_ids = db_service.get_user_deck(uid)
-        if not deck_ids: deck_ids = [1]*10 # 預設牌組
+        if not deck_ids: deck_ids = [1]*10 
         
-        # 轉換: Battle 需要 List[Card]
         all_cards = db_service.get_all_cards_dict()
         battle_deck = []
         for cid in deck_ids:
             c_data = all_cards.get(cid)
             if c_data:
-                # 注意：Battle 的 Card 類別可能跟 DB 欄位名稱不同，需適配
-                # 假設 src.common.models.Card 接受 id, name, cost, attack, health
                 battle_deck.append(Card(
                     id=c_data['id'],
                     name=c_data['name'],
                     cost=c_data['cost'],
                     attack=c_data['attack'],
-                    health=c_data['health']
+                    health=c_data['health'],
+                    type='Minion',
+                    rarity=c_data.get('rarity', 'Common')
                 ))
 
-        # 3. 定義回呼函數 (當收到對手動作時)
+        # 3. 建立回呼與物件
         def on_remote(intent):
-            print(f"[P2P] Received: {intent}")
-            # 這裡需要通知 BattleScene 更新畫面
-            # 但 BattleScene 在 Pygame 執行緒，這裡在 Socket 執行緒
-            # 我們需要一個機制來傳遞，或者讓 BattleScene 自己去 polling Battle 物件
+            # 這裡之後可以對接 UI 更新
             pass 
 
-        # 4. 建立 Battle 實例
         battle = Battle(battle_deck, on_remote_intent=on_remote)
-        
-        # 將 battle 物件存到 controller 以便傳給 Scene
         self.controller.p2p_battle = battle 
 
-        # 5. 開始連線 (這會阻塞，所以要用 Thread)
-        import threading
+        # 4. 自動連線邏輯 (背景執行)
         def connect_task():
-            try:
-                if mode == "HOST":
-                    port = dialog.result[1]
-                    print(f"Waiting for peer on port {port}...")
-                    battle.start_as_responder(port)
-                else:
-                    ip, port = dialog.result[1], dialog.result[2]
-                    print(f"Connecting to {ip}:{port}...")
-                    battle.start_as_initiator(ip, port)
-                
-                print("P2P Connected!")
-                # 連線成功後，切換到 BattleView
+            target_ip = "127.0.0.1"
+            target_port = 6001
+            
+            print(f"[P2P] Auto-connecting to {target_ip}:{target_port}...")
+            
+            # --- 嘗試 JOIN ---
+            # start_as_initiator 內部會嘗試 socket.connect
+            # 如果 Port 沒人聽，會回傳 False (在我們修改過的 p2p_peer.connect 中捕獲 OSError)
+            # 如果有人聽，但 Handshake 發現 ID 相同，也會回傳 False
+            
+            is_connected = battle.start_as_initiator(target_ip, target_port, user_id=uid)
+            
+            if is_connected:
+                print("[P2P] Joined existing room as Client.")
                 self.controller.after(0, lambda: self.controller.show_frame('BattleView'))
-            except Exception as e:
-                print(f"Connection failed: {e}")
+            
+            else:
+                # 連線失敗原因分析
+                reason = getattr(battle.peer, 'failure_reason', '')
+                if reason == 'SAME_USER':
+                    print("[P2P] Found room but it's SAME USER. Aborting.")
+                    self.controller.after(0, lambda: messagebox.showwarning("Warning", "You cannot play against yourself!"))
+                    battle.peer.close()
+                    return
+
+                # 如果不是因為帳號衝突，而是因為連不上 (OSError)，那就代表沒人開房
+                # --- 改為 HOST ---
+                print("[P2P] No room found (or connection failed). Starting Host...")
+                try:
+                    # 重新建立一個 peer (因為舊的 socket 可能已經髒了)
+                    battle.peer = P2PPeer(battle._on_intent)
+                    
+                    # 開始監聽 (這會阻塞直到有人連入)
+                    # 為了不讓 UI 完全卡死等待，這裡其實在 Thread 裡，所以可以阻塞
+                    # 但最好給個提示正在等待
+                    print(f"[P2P] Waiting for challenger on port {target_port}...")
+                    
+                    # 這裡我們可以先切換到 BattleView 顯示「等待中...」
+                    # 但目前的 BattleView 是直接進遊戲，所以我們先在這裡等
+                    
+                    success = battle.start_as_responder(target_port, user_id=uid)
+                    
+                    if success:
+                        print("[P2P] Client connected! Starting game.")
+                        self.controller.after(0, lambda: self.controller.show_frame('BattleView'))
+                    else:
+                        print("[P2P] Host start failed (maybe handshake rejected).")
+                        
+                except OSError:
+                    # Port 佔用嚴重錯誤
+                    print("[P2P] Port 6001 is busy but connect failed. Zombie process?")
+                    self.controller.after(0, lambda: messagebox.showerror("Error", "Port 6001 is busy."))
 
         threading.Thread(target=connect_task, daemon=True).start()
 

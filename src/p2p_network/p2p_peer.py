@@ -22,6 +22,12 @@ class P2PPeer:
         self.on_intent = on_intent
         self._recv_thread: Optional[threading.Thread] = None
         self._running = False
+        # 新增：儲存自己的 ID，用於驗證
+        self.my_user_id = None 
+        # 新增：連線狀態回報 (None=未定, True=成功, False=失敗)
+        self.handshake_status = None 
+        self.failure_reason = ""
+
 
     def _recv_loop(self):
         buf = b""
@@ -45,18 +51,36 @@ class P2PPeer:
                         except Exception:
                             pass
                     elif action == protocol.P2P_SEED_EXCHANGE:
+                        # --- 修改：接收種子與對方 ID ---
                         seed = int(payload.get('seed'))
-                        # accept and reply
+                        remote_uid = payload.get('user_id')
+                        
+                        # 檢查 ID 是否衝突
+                        if str(remote_uid) == str(self.my_user_id):
+                            print(f"[P2P] Rejecting self-connection from user {remote_uid}")
+                            # 回傳拒絕訊息
+                            ack = protocol.pack_message(protocol.P2P_SEED_ACK, {'accepted': False, 'reason': 'SAME_USER'})
+                            self.send_raw(ack)
+                            self._running = False # 斷開
+                            self.sock.close()
+                            return
+
+                        # ID 不同，接受連線
                         self.rng = RNGManager(seed)
                         ack = protocol.pack_message(protocol.P2P_SEED_ACK, {'accepted': True})
                         self.send_raw(ack)
+                        self.handshake_status = True
                     elif action == protocol.P2P_SEED_ACK:
-                        # initiator receives ACK
-                        # payload {accepted: bool}
                         accepted = payload.get('accepted', False)
                         if not accepted:
-                            # For prototype we won't handle rejection further
-                            pass
+                            reason = payload.get('reason', 'Unknown')
+                            print(f"[P2P] Handshake rejected: {reason}")
+                            self.handshake_status = False
+                            self.failure_reason = reason
+                            self._running = False
+                            self.sock.close()
+                        else:
+                            self.handshake_status = True
                     else:
                         # ignore other messages for now
                         pass
@@ -78,14 +102,19 @@ class P2PPeer:
         msg = protocol.pack_message(protocol.P2P_INTENT, intent)
         self.send_raw(msg)
 
-    def connect(self, peer_ip: str, peer_port: int, seed: Optional[int] = None, timeout: float = 5.0):
+    def connect(self, peer_ip: str, peer_port: int, user_id: int, seed: Optional[int] = None, timeout: float = 5.0):
         """Initiator: connect to peer and perform seed exchange.
 
         seed: if None, choose time-based seed.
         """
+        self.my_user_id = user_id
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(timeout)
-        s.connect((peer_ip, int(peer_port)))
+        try:
+            s.connect((peer_ip, int(peer_port)))
+        except OSError:
+            # 連線失敗 (沒人聽)，回傳 False
+            return False
         s.settimeout(None)
         self.sock = s
         self._running = True
@@ -95,34 +124,48 @@ class P2PPeer:
         if seed is None:
             seed = int(time.time())
 
-        # send seed
-        msg = protocol.pack_message(protocol.P2P_SEED_EXCHANGE, {'seed': seed})
+        # 發起者決定種子，所以必須在這裡立刻初始化
+        self.rng = RNGManager(seed)
+
+        # 修改：傳送 user_id
+        msg = protocol.pack_message(protocol.P2P_SEED_EXCHANGE, {'seed': seed, 'user_id': user_id})
         self.send_raw(msg)
 
-        # wait a short while for ack and rng to be set by recv
-        time.sleep(0.1)
-        if self.rng is None:
-            # if the other side didn't exchange, set rng ourselves (initiator's view)
-            self.rng = RNGManager(seed)
+        # 等待 Handshake 結果 (最多等 2 秒)
+        start_wait = time.time()
+        while self.handshake_status is None:
+            time.sleep(0.1)
+            if time.time() - start_wait > 2.0:
+                print("[P2P] Handshake timeout")
+                self.close()
+                return False
+        
+        return self.handshake_status
 
-        return True
-
-    def accept(self, listen_port: int, timeout: Optional[float] = None):
-        """Responder: listen for a connection and accept one peer.
-
-        This will block until a connection is accepted (or timeout).
-        """
+    def accept(self, listen_port: int,  user_id: int, timeout: Optional[float] = None):
+        """Responder: Wait for connection."""
+        self.my_user_id = user_id
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(('0.0.0.0', listen_port))
-        s.listen(1)
-        s.settimeout(timeout)
-        conn, addr = s.accept()
-        s.close()
+        
+        try:
+            s.bind(('0.0.0.0', listen_port))
+            s.listen(1)
+            s.settimeout(timeout)
+            print(f"[P2P] Listening on port {listen_port}...")
+            conn, addr = s.accept()
+        except Exception as e:
+            s.close()
+            raise e
+            
+        s.close() # 停止監聽
         self.sock = conn
         self._running = True
         self._recv_thread = threading.Thread(target=self._recv_loop, daemon=True)
         self._recv_thread.start()
+        
+        # Responder 等待收到 SEED_EXCHANGE
+        # 因為邏輯在 _recv_loop，這裡只需回傳 addr
         return addr
 
     def close(self):

@@ -35,8 +35,10 @@ class DeckBuilderScene:
             self._owned_screen = False
             
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont('Arial', 18)
-        self.title_font = pygame.font.SysFont('Arial', 22, bold=True)
+        self.font = ResourceManager.get_font(20)
+        self.title_font = ResourceManager.get_font(32)
+        self.large_font = ResourceManager.get_font(48)
+        self.battle_font = ResourceManager.get_font(36)
 
         self.user = user_data or {}
         self.user_id = self.user.get('user_id', 1)
@@ -151,8 +153,6 @@ class DeckBuilderScene:
          # 如果有錯誤，按鈕變紅色
         btn_color = (200, 50, 50) if self.error_timer > 0 else (50, 150, 50)
         pygame.draw.rect(self.screen, btn_color, self.back_rect, border_radius=5)
-        back_txt = self.font.render('Save & Back', True, (255, 255, 255))
-        self.screen.blit(back_txt, (back_x + 10, back_y + 8))
         
         back_txt = self.font.render('Save & Back', True, (255, 255, 255))
         # 文字置中
