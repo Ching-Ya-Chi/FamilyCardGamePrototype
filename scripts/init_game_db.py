@@ -38,12 +38,13 @@ def init_db():
         (6, "三明治守衛", 5, 6, 7, "Huge and ugly.", "Rare"),
         (7, "來杯咖啡嗎", 4, 2, 6, "Solid as a rock.", "Rare"),
         (8, "茶葉蛋大師", 2, 2, 2, "A wild beast.", "Rare"),
+        (9, "Family Guy", 1, 1, 4, "A guy.", "Common"),
         # ... 這裡為了簡化，剩下的 ID 9~30 我們隨機分配 Rare/Common
     ]
     
     # 補足卡片並隨機分配稀有度 (模擬資料庫)
     import random
-    for i in range(9, 31):
+    for i in range(10, 31):
         # 簡單機率分配用於測試
         r_val = random.random()
         if r_val < 0.2: rarity = "Rare"
@@ -87,9 +88,9 @@ def init_db():
     # 5. 建立市場掛單
     print("建立市場掛單...")
     listings = [
-        (2, 4, 500, 1), # Merchant 賣 Fire Dragon
-        (2, 5, 120, 2), # Merchant 賣 Ice Wizard
-        (2, 3, 50, 5),  # Merchant 賣 Ogre
+        (2, 4, 500, 1), 
+        (2, 5, 120, 2), 
+        (2, 3, 50, 5),  
     ]
     with db.transaction() as conn:
         conn.executemany("INSERT INTO market_listings (seller_id, card_id, price, quantity) VALUES (?, ?, ?, ?)", listings)

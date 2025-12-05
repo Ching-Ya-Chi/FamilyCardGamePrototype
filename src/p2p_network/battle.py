@@ -15,7 +15,7 @@ from src.p2p_network.rng_manager import RNGManager
 from src.common.models import Card
 from src.common import protocol
 
-SYSTEM_BONUS_CARD_ID = 1
+SYSTEM_BONUS_CARD_ID = 9
 
 class PlayerState:
     def __init__(self, is_local: bool):
